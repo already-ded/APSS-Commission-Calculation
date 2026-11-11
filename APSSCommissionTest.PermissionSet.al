@@ -1,0 +1,39 @@
+permissionset 90420 "APSS COMM TEST"
+{
+    Assignable = true;
+    Caption = 'APSS Commission Sandbox Test';
+    Permissions =
+        tabledata "APSS Commission Calculation" = RIMD,
+        tabledata "APSS Commission Allocation" = RIMD,
+        tabledata "Bank Account Ledger Entry" = R,
+        tabledata "Sales Shipment Line" = R,
+        tabledata "Sales Line" = R,
+        tabledata Vendor = R,
+        tabledata "G/L Entry" = R,
+        tabledata "G/L - Item Ledger Relation" = R,
+        tabledata "Value Entry" = R,
+        tabledata "Item Ledger Entry" = R,
+        table "APSS Commission Allocation" = X,
+        page "APSS Commission Allocations" = X,
+        codeunit "APSS Commission Accounting" = X,
+        tabledata "APSS Commission Purchase" = RIMD,
+        tabledata "Purch. Inv. Header" = R,
+        tabledata "Purch. Inv. Line" = R,
+        tabledata "Vendor Ledger Entry" = R,
+        tabledata "Detailed Vendor Ledg. Entry" = R,
+        tabledata "Sales Invoice Header" = R,
+        tabledata "Sales Invoice Line" = R,
+        tabledata "Cust. Ledger Entry" = R,
+        tabledata "Detailed Cust. Ledg. Entry" = R,
+        tabledata "General Ledger Setup" = R,
+        table "APSS Commission Calculation" = X,
+        table "APSS Commission Purchase" = X,
+        page "APSS Commission Purchases" = X,
+        page "Posted Sales Invoice" = X,
+        page "Posted Purchase Invoice" = X,
+        codeunit "APSS Commission Suppliers" = X,
+        page "APSS Commission Calculation" = X,
+        codeunit "APSS Commission Mgt." = X,
+        report "APSS Collect Commission" = X,
+        report "APSS Commission Smoke Test" = X;
+}
