@@ -37,10 +37,14 @@ codeunit 90422 "APSS Commission Suppliers"
 
         SalesInvLine.SetRange("Document No.", Commission."Our Ref");
         SalesInvLine.SetRange(Type, SalesInvLine.Type::Item);
+        // Only positive-quantity item lines represent goods to be matched to
+        // supplier invoices. Blank/zero and negative item lines are ignored.
+        SalesInvLine.SetFilter("Quantity (Base)", '>%1', 0);
         if SalesInvLine.FindSet() then
             repeat
                 ItemLineCount += 1;
                 CollectRelatedInvoices(Commission, SalesInvLine, AsOfDate);
+                CollectAdvanceInvoicesByAnalysis(Commission, AsOfDate);
                 Clear(Problem);
                 if not MatchAndAllocateLine(Commission, SalesInvLine, AsOfDate, Problem) then begin
                     UnmatchedCount += 1;
@@ -58,7 +62,8 @@ codeunit 90422 "APSS Commission Suppliers"
         if Detail.FindSet() then
             repeat
                 TotalAllocatedUSD += Detail."Allocated Cost USD";
-                if Detail."Matched Item Line Count" = 0 then begin
+                if (Detail."Matched Item Line Count" = 0) and
+                   (StrPos(UpperCase(Detail."Match Source"), 'ADV') = 0) then begin
                     Commission."Supplier Match Complete" := false;
                     if FirstProblem = '' then
                         FirstProblem := CopyStr(StrSubstNo('Related purchase invoice %1 has no confirmed item allocation.', Detail."Purchase Invoice No."), 1, 250);
@@ -282,6 +287,30 @@ codeunit 90422 "APSS Commission Suppliers"
         exit(true);
     end;
 
+    local procedure CollectAdvanceInvoicesByAnalysis(Commission: Record "APSS Commission Calculation"; AsOfDate: Date)
+    var
+        PurchaseHeader: Record "Purch. Inv. Header";
+        HeaderRef: RecordRef;
+    begin
+        if Commission."Analysis No." = '' then
+            exit;
+        // Analysis No. remains the primary relationship. The standard posted
+        // purchase-header Prepayment Order No. only identifies the additional
+        // ADV invoice; it is never used as a replacement for Analysis No.
+        HeaderRef.GetTable(PurchaseHeader);
+        if not SetAnalysisFilter(HeaderRef, Commission."Analysis No.") then begin
+            HeaderRef.Close();
+            exit;
+        end;
+        if HeaderRef.FindSet() then
+            repeat
+                HeaderRef.SetTable(PurchaseHeader);
+                if IsAdvanceSupplierInvoice(PurchaseHeader) then
+                    AddOrUpdatePurchaseDetail(Commission, PurchaseHeader, AsOfDate, 'Analysis + ADV Prepayment Order No.', 0, 0);
+            until HeaderRef.Next() = 0;
+        HeaderRef.Close();
+    end;
+
     local procedure FindAnalysisCandidates(AnalysisNo: Code[50]; SalesInvLine: Record "Sales Invoice Line"; AsOfDate: Date; var Candidate: Record "Purch. Inv. Line" temporary)
     var
         PurchaseHeader: Record "Purch. Inv. Header";
@@ -404,7 +433,7 @@ codeunit 90422 "APSS Commission Suppliers"
                 VendorEntry.SetFilter("Date Filter", '..%1', AsOfDate);
                 VendorEntry.CalcFields("Remaining Amount");
                 Detail."Remaining Amount" := Abs(VendorEntry."Remaining Amount");
-                ReadPayments(VendorEntry, AsOfDate, Detail);
+                ReadPayments(VendorEntry, AsOfDate, Detail, Commission."Analysis No.", IsAdvanceSupplierInvoice(PurchaseHeader));
             end;
         end;
         Detail."Allocated Quantity (Base)" += QuantityBase;
@@ -452,7 +481,7 @@ codeunit 90422 "APSS Commission Suppliers"
         exit(Entry.FindFirst());
     end;
 
-    local procedure ReadPayments(Entry: Record "Vendor Ledger Entry"; AsOfDate: Date; var Detail: Record "APSS Commission Purchase")
+    local procedure ReadPayments(Entry: Record "Vendor Ledger Entry"; AsOfDate: Date; var Detail: Record "APSS Commission Purchase"; SalesAnalysisNo: Code[50]; IsAdvanceInvoice: Boolean)
     var
         Application: Record "Detailed Vendor Ledg. Entry";
         Payment: Record "Vendor Ledger Entry";
@@ -468,7 +497,8 @@ codeunit 90422 "APSS Commission Suppliers"
                     if Payment.Get(Application."Applied Vend. Ledger Entry No.") then
                         if (Payment."Document Type" = Payment."Document Type"::Payment) and
                            (Payment."Vendor No." = Entry."Vendor No.") and
-                           (Payment."Posting Date" <= AsOfDate) and (Application.Amount > 0) then begin
+                           (Payment."Posting Date" <= AsOfDate) and (Application.Amount > 0) and
+                           (IsAdvanceInvoice or VendorPaymentMatchesAnalysis(Payment, SalesAnalysisNo)) then begin
                             Detail."Cash Paid Amount" += Application.Amount;
                             if Payment."Posting Date" > Detail."Last Payment Date" then
                                 Detail."Last Payment Date" := Payment."Posting Date";
@@ -478,6 +508,44 @@ codeunit 90422 "APSS Commission Suppliers"
             (Abs(Entry."Original Amount") > 0.01) and
             (Detail."Cash Paid Amount" >= Abs(Entry."Original Amount") - 0.01) and
             (Detail."Last Payment Date" <> 0D);
+    end;
+
+    local procedure IsAdvanceSupplierInvoice(PurchaseHeader: Record "Purch. Inv. Header"): Boolean
+    var
+        Terms: Text;
+        InvoiceNo: Text;
+    begin
+        Terms := UpperCase(PurchaseHeader."Payment Terms Code");
+        InvoiceNo := UpperCase(PurchaseHeader."No.");
+        // The standard table-122 Prepayment Order No. is the authoritative
+        // indicator. ADV + 100% remains a compatibility fallback for older
+        // records that did not populate the field.
+        exit((PurchaseHeader."Prepayment Order No." <> '') or
+             ((CopyStr(InvoiceNo, 1, 3) = 'ADV') and
+              ((StrPos(Terms, 'ADV') > 0) or (StrPos(Terms, '100') > 0))));
+    end;
+
+    local procedure VendorPaymentMatchesAnalysis(Payment: Record "Vendor Ledger Entry"; SalesAnalysisNo: Code[50]): Boolean
+    var
+        Ref: RecordRef;
+        Fld: FieldRef;
+        I: Integer;
+        Value: Text;
+    begin
+        if SalesAnalysisNo = '' then
+            exit(false);
+        Ref.GetTable(Payment);
+        for I := 1 to Ref.FieldCount() do begin
+            Fld := Ref.FieldIndex(I);
+            if ((Fld.Name = 'APSS Analysis No.') or (Fld.Name = 'Analysis No.') or
+                (Fld.Name = 'Analysis No')) and (Fld.Type = FieldType::Code) then begin
+                Value := Format(Fld.Value);
+                Ref.Close();
+                exit(Value = SalesAnalysisNo);
+            end;
+        end;
+        Ref.Close();
+        exit(false);
     end;
 
     local procedure HasOtherItemSalesLine(Commission: Record "APSS Commission Calculation"; CurrentLine: Record "Sales Invoice Line"): Boolean

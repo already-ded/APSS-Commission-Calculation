@@ -66,7 +66,7 @@ page 90420 "APSS Commission Calculation"
                     end;
                 }
                 field("Invoice Date"; Rec."Invoice Date") { ApplicationArea = All; Editable = false; }
-                field("Customer Payment Date"; Rec."Customer Payment Date") { ApplicationArea = All; Editable = false; }
+                field("Customer Payment Date"; Rec."Customer Payment Date") { ApplicationArea = All; Editable = false; ToolTip = 'Specifies the latest Posting Date of a currently applied customer Payment. Bank-charge payments are included without requiring a bank ledger entry.'; }
                 field("Currency Code"; Rec."Currency Code") { ApplicationArea = All; Editable = false; }
                 field(Amount; Rec.Amount) { ApplicationArea = All; Editable = false; }
                 field("Exchange Rate"; Rec."Exchange Rate") { ApplicationArea = All; Editable = false; }

@@ -2,11 +2,11 @@ codeunit 90420 "APSS Commission Mgt."
 {
     // Phase 1: sales collection and explicitly reviewed calculation previews.
     // Supplier links and payroll approval are deliberately not inferred.
-    // Collect by the last verified customer bank receipt DOCUMENT DATE.
-    // This is the same date source used by report 50047 "APSS PL by Posted SI".
+    // Collect by the latest currently applied customer Payment Posting Date.
+    // Bank-charge payments do not require a bank ledger entry.
     // Each selected commission month covers the 26th of the prior month
     // through the 25th of the selected month (both dates inclusive).
-    // A fully cash-settled customer invoice can be collected even if its
+    // A fully settled customer invoice can be collected even if its
     // sales invoice Posting Date belongs to an earlier month.
     procedure CollectForMonth(CommissionMonth: Date)
     var
@@ -26,14 +26,14 @@ codeunit 90420 "APSS Commission Mgt."
             Error('This test version requires LCY Code USD. Current LCY is %1.', GLSetup."LCY Code");
 
         // Keep the commission MONTH stored as the 1st of the chosen month,
-        // but collect last bank receipts dated 26th prior month..25th chosen month.
+        // but collect last applied payments dated 26th prior month..25th chosen month.
         // Using the 25th as the anchor avoids invalid dates in short months.
         MonthStart := DMY2Date(1, Date2DMY(CommissionMonth, 2), Date2DMY(CommissionMonth, 3));
         PeriodEnd := DMY2Date(25, Date2DMY(CommissionMonth, 2), Date2DMY(CommissionMonth, 3));
         PeriodStart := CalcDate('<-1M>', PeriodEnd) + 1;
 
         // Do not filter on Sales Invoice Posting Date at all: the commission
-        // month is based solely on the last verified bank receipt Document Date.
+        // month is based on the latest applied Payment Posting Date.
         // This scans posted invoices from all periods (may take longer in a
         // company with a large invoice history).
         RefreshExistingMonth(MonthStart);
@@ -42,7 +42,7 @@ codeunit 90420 "APSS Commission Mgt."
                 CollectInvoice(Invoice, MonthStart, PeriodStart, PeriodEnd, Collected, Refreshed, Skipped);
             until Invoice.Next() = 0;
 
-        Message('%1 new invoice(s), %2 refreshed, %3 approved/skipped. Commission Month: %4; last bank receipt Document Date: %5 through %6 (inclusive).',
+        Message('%1 new invoice(s), %2 refreshed, %3 approved/skipped. Commission Month: %4; latest applied Payment Posting Date: %5 through %6 (inclusive).',
             Collected, Refreshed, Skipped, MonthStart, PeriodStart, PeriodEnd);
     end;
 
@@ -51,18 +51,18 @@ codeunit 90420 "APSS Commission Mgt."
         CLE: Record "Cust. Ledger Entry";
         Line: Record "APSS Commission Calculation";
         NewLine: Boolean;
-        LastReceiptDate: Date;
+        LastPaymentDate: Date;
         SupplierMgt: Codeunit "APSS Commission Suppliers";
         AccountingMgt: Codeunit "APSS Commission Accounting";
     begin
-        // First verify full CASH settlement and retrieve the last bank receipt
-        // Document Date. An invoice's Posting Date NEVER selects the month.
+        // First verify full settlement and retrieve the last applied Payment
+        // Posting Date. The sales invoice Posting Date never selects the month.
         if not FindInvoiceLedgerEntry(Invoice, CLE) then
             exit;
         CLE.CalcFields("Original Amount", "Original Amt. (LCY)", "Remaining Amount");
-        if not GetCashSettlement(CLE, LastReceiptDate) then
+        if not GetAppliedPaymentSettlement(CLE, LastPaymentDate) then
             exit;
-        if (LastReceiptDate < PeriodStart) or (LastReceiptDate > PeriodEnd) then
+        if (LastPaymentDate < PeriodStart) or (LastPaymentDate > PeriodEnd) then
             exit;
 
         Line.LockTable();
@@ -98,10 +98,10 @@ codeunit 90420 "APSS Commission Mgt."
         Invoice.CalcFields(Amount);
         Line.Amount := Invoice.Amount;
 
-        // Clear prior calculated results; preserve reviewed purchase-cost inputs.
+        // Clear prior calculated results; supplier recollection resets review confirmation.
         Line."Customer Ledger Entry No." := CLE."Entry No.";
         Line."Customer Remaining Amount" := CLE."Remaining Amount";
-        Line."Customer Payment Date" := LastReceiptDate;
+        Line."Customer Payment Date" := LastPaymentDate;
         Line."Customer Paid" := true;
         Line."Invoice (USD)" := 0;
         Line."Exchange Rate" := 0;
@@ -116,7 +116,7 @@ codeunit 90420 "APSS Commission Mgt."
         Line."Commission Rate (%)" := 15;
         Line."Monthly Interest Rate" := 1;
         Line.Status := Line.Status::"Review Required";
-        Line."Calculation Note" := 'Customer fully paid. Last bank receipt Document Date is within the 26th-to-25th commission period; supplier documents/payments require review.';
+        Line."Calculation Note" := 'Customer fully paid. Latest applied Payment Posting Date is within the 26th-to-25th commission period; supplier documents/payments require review.';
         if Line."Analysis No." = '' then
             Line."Calculation Note" := 'Customer fully paid but Analysis No. missing. Supplier matching requires review.';
         Line."Collection Run Date" := CurrentDateTime();
@@ -238,63 +238,63 @@ codeunit 90420 "APSS Commission Mgt."
         exit(CopyStr(Invoice."Opportunity No.", 1, 50));
     end;
 
-    // Report 50047 derives its Payment Date from the matching Bank Account
-    // Ledger Entry's Document Date (using Source Code CASHRECJNL on the
-    // Detailed Customer Ledger Entry). Unlike the report's FindFirst(),
-    // calculate the LAST receipt date across all verified partial receipts.
-    local procedure GetCashSettlement(CLE: Record "Cust. Ledger Entry"; var PaymentDate: Date): Boolean
+    local procedure GetAppliedPaymentSettlement(CLE: Record "Cust. Ledger Entry"; var PaymentDate: Date): Boolean
     var
         Detail: Record "Detailed Cust. Ledg. Entry";
         Payment: Record "Cust. Ledger Entry";
-        BankEntry: Record "Bank Account Ledger Entry";
-        CashApplied: Decimal;
-        ReceiptDate: Date;
     begin
         PaymentDate := 0D;
+        CLE.SetRange("Date Filter");
         CLE.CalcFields("Original Amount", "Remaining Amount");
-
-        // The bank receipt Document Date determines the month. Do not use an
-        // application Posting Date cutoff here, because a bank receipt dated
-        // in one month can be posted in another. Use current active payments
-        // and the current remaining balance, as the source report does.
-        if (CLE."Original Amount" <= 0) or (Abs(CLE."Remaining Amount") > 0.01) then
+        // Use current BC settlement, including bank-charge Payment entries.
+        // This is not a historical balance reconstruction as of payout cutoff.
+        if CLE.Open or CLE.Reversed or (CLE."Original Amount" <= 0) or
+           (Abs(CLE."Remaining Amount") > 0.01) then
             exit(false);
+        exit(FindLastAppliedPaymentDate(CLE, Detail, Payment, PaymentDate));
+    end;
 
-        Detail.SetRange("Cust. Ledger Entry No.", CLE."Entry No.");
+    // Shared by collection and the temporary-record smoke tests. Both link
+    // directions are required: the invoice can itself be the applying entry.
+    procedure FindLastAppliedPaymentDate(InvoiceEntry: Record "Cust. Ledger Entry"; var Detail: Record "Detailed Cust. Ledg. Entry"; var Payment: Record "Cust. Ledger Entry"; var PaymentDate: Date): Boolean
+    begin
+        PaymentDate := 0D;
+        Detail.Reset();
+        Detail.SetRange("Cust. Ledger Entry No.", InvoiceEntry."Entry No.");
         Detail.SetRange("Entry Type", Detail."Entry Type"::Application);
         Detail.SetRange(Unapplied, false);
-        // Use the same receipt-journal source code as the APSS P/L report.
-        Detail.SetRange("Source Code", 'CASHRECJNL');
+        Detail.SetFilter(Amount, '<>%1', 0);
         if Detail.FindSet() then
             repeat
-                if (Detail."Applied Cust. Ledger Entry No." <> CLE."Entry No.") and
-                   (Detail.Amount < 0) then
-                    if Payment.Get(Detail."Applied Cust. Ledger Entry No.") then
-                        if (Payment."Document Type" = Payment."Document Type"::Payment) and
-                           (Payment."Customer No." = CLE."Customer No.") then begin
-                            ReceiptDate := 0D;
-                            BankEntry.Reset();
-                            BankEntry.SetRange("Document No.", Payment."Document No.");
-                            BankEntry.SetRange("Posting Date", Payment."Posting Date");
-                            BankEntry.SetRange(Reversed, false);
-                            BankEntry.SetFilter(Amount, '>%1', 0); // Incoming bank receipts only.
-                            if BankEntry.FindSet() then
-                                repeat
-                                    if BankEntry."Document Date" > ReceiptDate then
-                                        ReceiptDate := BankEntry."Document Date";
-                                until BankEntry.Next() = 0;
-
-                            // Only count payment applications with verified
-                            // bank ledger receipts, not credit memos/discounts.
-                            if ReceiptDate <> 0D then begin
-                                CashApplied -= Detail.Amount;
-                                if ReceiptDate > PaymentDate then
-                                    PaymentDate := ReceiptDate;
-                            end;
-                        end;
+                UpdateLastPaymentDate(InvoiceEntry, Detail."Applied Cust. Ledger Entry No.", Payment, PaymentDate);
             until Detail.Next() = 0;
 
-        exit((CashApplied >= CLE."Original Amount" - 0.01) and (PaymentDate <> 0D));
+        Detail.Reset();
+        Detail.SetRange("Applied Cust. Ledger Entry No.", InvoiceEntry."Entry No.");
+        Detail.SetRange("Entry Type", Detail."Entry Type"::Application);
+        Detail.SetRange(Unapplied, false);
+        Detail.SetFilter(Amount, '<>%1', 0);
+        if Detail.FindSet() then
+            repeat
+                UpdateLastPaymentDate(InvoiceEntry, Detail."Cust. Ledger Entry No.", Payment, PaymentDate);
+            until Detail.Next() = 0;
+        exit(PaymentDate <> 0D);
+    end;
+
+    local procedure UpdateLastPaymentDate(InvoiceEntry: Record "Cust. Ledger Entry"; PaymentEntryNo: Integer; var Payment: Record "Cust. Ledger Entry"; var PaymentDate: Date)
+    begin
+        if (PaymentEntryNo = 0) or (PaymentEntryNo = InvoiceEntry."Entry No.") then
+            exit;
+        Payment.Reset();
+        if not Payment.Get(PaymentEntryNo) then
+            exit;
+        if (Payment."Document Type" <> Payment."Document Type"::Payment) or
+           (Payment."Customer No." <> InvoiceEntry."Customer No.") or Payment.Reversed then
+            exit;
+        // No CASHRECJNL filter, bank lookup or bank amount coverage test.
+        // Credit memos/refunds are not Payment records and never supply a date.
+        if Payment."Posting Date" > PaymentDate then
+            PaymentDate := Payment."Posting Date";
     end;
 
     procedure CalculateAdvanceAndCommission(var Commission: Record "APSS Commission Calculation")

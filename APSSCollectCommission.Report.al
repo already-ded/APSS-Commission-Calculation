@@ -29,7 +29,7 @@ report 90420 "APSS Collect Commission"
                     {
                         Caption = 'Commission Month';
                         ApplicationArea = All;
-                        ToolTip = 'Select the commission month. The last bank receipt Document Date must fall from the 26th of the prior month to the 25th of the selected month (inclusive). Supplier item matching and payment remain subject to review.';
+                        ToolTip = 'Select the commission month. The latest applied customer Payment Posting Date must fall from the 26th of the prior month to the 25th of the selected month (inclusive). Supplier item matching and payment remain subject to review.';
                     }
                 }
             }

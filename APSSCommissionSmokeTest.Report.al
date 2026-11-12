@@ -14,6 +14,7 @@ report 90421 "APSS Commission Smoke Test"
                 Line: Record "APSS Commission Calculation" temporary;
                 Mgt: Codeunit "APSS Commission Mgt.";
             begin
+                CheckAppliedPaymentDates();
                 Line.Init();
                 Line."Invoice (USD)" := 10000;
                 Line."Bill (USD)" := 7500;
@@ -84,6 +85,101 @@ report 90421 "APSS Commission Smoke Test"
             end;
         }
     }
+    local procedure CheckAppliedPaymentDates()
+    var
+        InvoiceEntry: Record "Cust. Ledger Entry" temporary;
+        Payments: Record "Cust. Ledger Entry" temporary;
+        Details: Record "Detailed Cust. Ledg. Entry" temporary;
+        Mgt: Codeunit "APSS Commission Mgt.";
+        PaymentDate: Date;
+    begin
+        InvoiceEntry.Init();
+        InvoiceEntry."Entry No." := 100;
+        InvoiceEntry."Customer No." := 'TEST-CUSTOMER';
+        InvoiceEntry."Document Type" := InvoiceEntry."Document Type"::Invoice;
+        InvoiceEntry."Posting Date" := DMY2Date(28, 5, 2026);
+        InsertTestPayment(Payments, 200, DMY2Date(2, 10, 2026));
+        InsertTestPayment(Payments, 201, DMY2Date(2, 10, 2026));
+        // USD 987.84 receipt + USD 10 bank-charge Payment, with no bank records.
+        InsertTestApplication(Details, 1, 100, 200, -987.84, false);
+        InsertTestApplication(Details, 2, 100, 201, -10, false);
+        if not Mgt.FindLastAppliedPaymentDate(InvoiceEntry, Details, Payments, PaymentDate) then
+            Error('Applied receipt and bank-charge Payments must produce a date without bank entries.');
+        CheckPaymentDate('May invoice paid in October', DMY2Date(2, 10, 2026), PaymentDate);
+
+        Payments.Get(201);
+        Payments."Posting Date" := DMY2Date(3, 10, 2026);
+        Payments.Modify();
+        Mgt.FindLastAppliedPaymentDate(InvoiceEntry, Details, Payments, PaymentDate);
+        CheckPaymentDate('Latest payment, not first', DMY2Date(3, 10, 2026), PaymentDate);
+
+        Details.Reset();
+        Details.DeleteAll();
+        // Reverse links, used when the invoice is the applying entry.
+        InsertTestApplication(Details, 3, 200, 100, 987.84, false);
+        InsertTestApplication(Details, 4, 201, 100, 10, false);
+        InsertTestPayment(Payments, 202, DMY2Date(30, 10, 2026));
+        InsertTestApplication(Details, 5, 202, 100, 10, true);
+        InsertTestPayment(Payments, 203, DMY2Date(30, 10, 2026));
+        Payments.Get(203);
+        Payments.Reversed := true;
+        Payments.Modify();
+        InsertTestApplication(Details, 6, 203, 100, 10, false);
+        InsertTestPayment(Payments, 204, DMY2Date(30, 10, 2026));
+        Payments.Get(204);
+        Payments."Document Type" := Payments."Document Type"::"Credit Memo";
+        Payments.Modify();
+        InsertTestApplication(Details, 7, 204, 100, 10, false);
+        InsertTestPayment(Payments, 205, DMY2Date(30, 10, 2026));
+        Payments.Get(205);
+        Payments."Customer No." := 'OTHER-CUSTOMER';
+        Payments.Modify();
+        InsertTestApplication(Details, 8, 205, 100, 10, false);
+        Mgt.FindLastAppliedPaymentDate(InvoiceEntry, Details, Payments, PaymentDate);
+        CheckPaymentDate('Reverse links; ignore unapplied, reversed, credit and other customer', DMY2Date(3, 10, 2026), PaymentDate);
+
+        Payments.Get(201);
+        Payments."Posting Date" := DMY2Date(2, 11, 2026);
+        Payments.Modify();
+        Mgt.FindLastAppliedPaymentDate(InvoiceEntry, Details, Payments, PaymentDate);
+        CheckPaymentDate('Use latest overall payment before selecting the month', DMY2Date(2, 11, 2026), PaymentDate);
+        Details.Reset();
+        Details.DeleteAll();
+        InsertTestApplication(Details, 9, 204, 100, 997.84, false);
+        if Mgt.FindLastAppliedPaymentDate(InvoiceEntry, Details, Payments, PaymentDate) then
+            Error('Credit-only settlement must not produce a Payment date.');
+        CheckPaymentDate('No Payment means no date', 0D, PaymentDate);
+    end;
+
+    local procedure InsertTestPayment(var Payments: Record "Cust. Ledger Entry" temporary; EntryNo: Integer; PostingDate: Date)
+    begin
+        Payments.Init();
+        Payments."Entry No." := EntryNo;
+        Payments."Customer No." := 'TEST-CUSTOMER';
+        Payments."Document Type" := Payments."Document Type"::Payment;
+        Payments."Posting Date" := PostingDate;
+        Payments.Insert();
+    end;
+
+    local procedure InsertTestApplication(var Details: Record "Detailed Cust. Ledg. Entry" temporary; EntryNo: Integer; CustEntryNo: Integer; AppliedEntryNo: Integer; AppliedAmount: Decimal; IsUnapplied: Boolean)
+    begin
+        Details.Init();
+        Details."Entry No." := EntryNo;
+        Details."Cust. Ledger Entry No." := CustEntryNo;
+        Details."Applied Cust. Ledger Entry No." := AppliedEntryNo;
+        Details."Entry Type" := Details."Entry Type"::Application;
+        Details."Source Code" := 'GENJNL';
+        Details.Amount := AppliedAmount;
+        Details.Unapplied := IsUnapplied;
+        Details.Insert();
+    end;
+
+    local procedure CheckPaymentDate(Name: Text; Expected: Date; Actual: Date)
+    begin
+        if Expected <> Actual then
+            Error('%1: expected %2, actual %3.', Name, Expected, Actual);
+    end;
+
     local procedure CheckValue(Name: Text; Expected: Decimal; Actual: Decimal)
     begin
         if Abs(Expected - Actual) > 0.000001 then
