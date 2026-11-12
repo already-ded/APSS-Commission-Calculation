@@ -24,12 +24,20 @@ page 90420 "APSS Commission Calculation"
                 field("Supplier Collection Note"; Rec."Supplier Collection Note") { ApplicationArea = All; }
                 field("Supplier Match Complete"; Rec."Supplier Match Complete") { ApplicationArea = All; Editable = false; }
                 field("Unmatched Item Lines"; Rec."Unmatched Item Lines") { ApplicationArea = All; Editable = false; }
-                field("Cost Inputs Reviewed"; Rec."Cost Inputs Reviewed") { ApplicationArea = All; }
+                field("Cost Inputs Reviewed"; Rec."Cost Inputs Reviewed")
+                {
+                    ApplicationArea = All;
+                    trigger OnValidate()
+                    var
+                        CommissionMgt: Codeunit "APSS Commission Mgt.";
+                    begin
+                        CommissionMgt.CalculateAdvanceAndCommission(Rec);
+                    end;
+                }
                 field("Calculated Commission Preview"; Rec."Calculated Commission Preview") { ApplicationArea = All; }
                 field("Customer Ledger Entry No."; Rec."Customer Ledger Entry No.") { ApplicationArea = All; }
                 field("Commission Month"; Rec."Commission Month") { ApplicationArea = All; Editable = false; }
                 field(Status; Rec.Status) { ApplicationArea = All; Editable = false; }
-                field(Eligible; Rec.Eligible) { ApplicationArea = All; }
                 field(Type; Rec.Type) { ApplicationArea = All; Editable = false; }
                 field("Customer No."; Rec."Customer No.") { ApplicationArea = All; Editable = false; }
                 field("Customer Name"; Rec."Customer Name") { ApplicationArea = All; Editable = false; }

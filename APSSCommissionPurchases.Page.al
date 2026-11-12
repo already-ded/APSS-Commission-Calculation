@@ -31,7 +31,6 @@ page 90422 "APSS Commission Purchases"
                 field("Currency Code"; Rec."Currency Code") { ApplicationArea = All; }
                 field("Invoice Amount"; Rec."Invoice Amount") { ApplicationArea = All; }
                 field("Invoice USD"; Rec."Invoice USD") { ApplicationArea = All; }
-                field("Allocated Quantity (Base)"; Rec."Allocated Quantity (Base)") { ApplicationArea = All; }
                 field("Allocated Cost USD"; Rec."Allocated Cost USD") { ApplicationArea = All; }
                 field("Matched Item Line Count"; Rec."Matched Item Line Count") { ApplicationArea = All; }
                 field("Payment Terms Code"; Rec."Payment Terms Code") { ApplicationArea = All; }

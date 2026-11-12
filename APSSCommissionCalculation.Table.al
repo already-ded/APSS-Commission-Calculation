@@ -223,8 +223,8 @@ table 90420 "APSS Commission Calculation"
         }
         field(46; "Cost Inputs Reviewed"; Boolean)
         {
-            Caption = 'Cost Inputs Reviewed (Test)';
-            ToolTip = 'Confirms test supplier cost, freight and payment date inputs have been entered. Does not authorize commission payment.';
+            Caption = 'Reviewed';
+            ToolTip = 'Confirms that you have checked this commission row and its sales, supplier, cost and payment information. Recollection clears this confirmation. This is not a posting approval.';
         }
         field(47; "Calculated Commission Preview"; Decimal)
         {

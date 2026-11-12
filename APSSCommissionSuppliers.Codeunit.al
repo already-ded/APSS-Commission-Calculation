@@ -40,6 +40,7 @@ codeunit 90422 "APSS Commission Suppliers"
         if SalesInvLine.FindSet() then
             repeat
                 ItemLineCount += 1;
+                CollectRelatedInvoices(Commission, SalesInvLine, AsOfDate);
                 Clear(Problem);
                 if not MatchAndAllocateLine(Commission, SalesInvLine, AsOfDate, Problem) then begin
                     UnmatchedCount += 1;
@@ -57,6 +58,11 @@ codeunit 90422 "APSS Commission Suppliers"
         if Detail.FindSet() then
             repeat
                 TotalAllocatedUSD += Detail."Allocated Cost USD";
+                if Detail."Matched Item Line Count" = 0 then begin
+                    Commission."Supplier Match Complete" := false;
+                    if FirstProblem = '' then
+                        FirstProblem := CopyStr(StrSubstNo('Related purchase invoice %1 has no confirmed item allocation.', Detail."Purchase Invoice No."), 1, 250);
+                end;
                 if not Detail."Cash Paid" then
                     AllMatchedInvoicesPaid := false;
                 if Detail."Last Payment Date" > LatestSupplierPayment then
@@ -83,10 +89,31 @@ codeunit 90422 "APSS Commission Suppliers"
                         ItemLineCount, Commission."Supplier Document Count", GetPaymentNote(Commission."Suppliers Paid")), 1, 250)
             else
                 Commission."Supplier Collection Note" := CopyStr(
-                    StrSubstNo('%1 of %2 item line(s) unresolved. Supplier eligibility blocked; accounting profit is calculated separately. %3',
-                        UnmatchedCount, ItemLineCount, FirstProblem), 1, 250);
+                    StrSubstNo('%1 related purchase invoice(s) collected; matching needs review. Accounting Bill is calculated separately. %2',
+                        Commission."Supplier Document Count", FirstProblem), 1, 250);
 
         CommissionMgt.CalculateAdvanceAndCommission(Commission);
+    end;
+
+    local procedure CollectRelatedInvoices(Commission: Record "APSS Commission Calculation"; SalesInvLine: Record "Sales Invoice Line"; AsOfDate: Date)
+    var
+        Candidate: Record "Purch. Inv. Line" temporary;
+        PurchaseHeader: Record "Purch. Inv. Header";
+        ExplicitLinkFound: Boolean;
+    begin
+        if SalesInvLine."Quantity (Base)" <= 0 then
+            exit;
+        // Discovery is independent of allocation. A PO link must not hide a
+        // second vendor invoice carrying the same analysis and sales item.
+        ExplicitLinkFound := FindExplicitPOCandidates(SalesInvLine, AsOfDate, Candidate);
+        if Commission."Analysis No." <> '' then
+            FindAnalysisCandidates(Commission."Analysis No.", SalesInvLine, AsOfDate, Candidate);
+        Candidate.Reset();
+        if Candidate.FindSet() then
+            repeat
+                PurchaseHeader.Get(Candidate."Document No.");
+                AddOrUpdatePurchaseDetail(Commission, PurchaseHeader, AsOfDate, 'Related PO/analysis + item; review allocation', 0, 0);
+            until Candidate.Next() = 0;
     end;
 
     local procedure MatchAndAllocateLine(Commission: Record "APSS Commission Calculation"; SalesInvLine: Record "Sales Invoice Line"; AsOfDate: Date; var Problem: Text[250]): Boolean
@@ -128,6 +155,29 @@ codeunit 90422 "APSS Commission Suppliers"
                 Problem := 'Item is also invoiced on another line/invoice for the same analysis; requires a PO/receipt allocation link.';
                 exit(false);
             end;
+        end;
+
+        // A sale can be supplied by more than one PO/vendor. Supplement an
+        // insufficient explicit PO match with analysis evidence, but retain
+        // the ambiguity checks before assigning any cost.
+        if IsExplicitLink and (Commission."Analysis No." <> '') then begin
+            Candidate.Reset();
+            if Candidate.FindSet() then
+                repeat
+                    AvailableQty := Candidate."Quantity (Base)" - GetAlreadyAllocatedQty(Candidate);
+                    if AvailableQty > 0.00001 then
+                        TotalAvailableQty += AvailableQty;
+                until Candidate.Next() = 0;
+            if TotalAvailableQty < SalesQty - 0.00001 then begin
+                if HasOtherItemSalesLine(Commission, SalesInvLine) then begin
+                    Problem := 'PO quantity is insufficient and the same item is sold on other lines/invoices. Related invoices collected; allocation needs review.';
+                    exit(false);
+                end;
+                FindAnalysisCandidates(Commission."Analysis No.", SalesInvLine, AsOfDate, Candidate);
+                IsExplicitLink := false;
+                SourceLabel := 'PO + Analysis + Item + Qty';
+            end;
+            TotalAvailableQty := 0;
         end;
 
         Candidate.Reset();
@@ -345,7 +395,7 @@ codeunit 90422 "APSS Commission Suppliers"
             Detail."Payment Terms Code" := PurchaseHeader."Payment Terms Code";
             Detail."Match Source" := MatchSource;
             Detail."As Of Date" := AsOfDate;
-            Detail."Review Note" := 'Only matched purchase item lines contribute to allocated cost; verify any freight and additional charges.';
+            Detail."Review Note" := 'Related goods invoice found. No cost allocated yet; verify the link to this sale. Accounting Bill is calculated separately.';
             PurchaseHeader.CalcFields(Amount);
             Detail."Invoice Amount" := PurchaseHeader.Amount;
             if GetCostFactor(PurchaseHeader, VendorEntry, Factor) then begin
@@ -359,7 +409,11 @@ codeunit 90422 "APSS Commission Suppliers"
         end;
         Detail."Allocated Quantity (Base)" += QuantityBase;
         Detail."Allocated Cost USD" += AllocatedUSD;
-        Detail."Matched Item Line Count" += 1;
+        if QuantityBase > 0 then begin
+            Detail."Matched Item Line Count" += 1;
+            Detail."Match Source" := MatchSource;
+            Detail."Review Note" := 'Item allocation confirmed for this invoice. Full invoice amount can differ from the portion assigned to this sale. Accounting Bill already includes freight.';
+        end;
         if IsNew then
             Detail.Insert()
         else

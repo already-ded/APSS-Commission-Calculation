@@ -49,7 +49,27 @@ report 90421 "APSS Commission Smoke Test"
                 CheckValue('No advance deduction', 375, Line."Calculated Commission Preview");
                 Line."Bill (USD)" := 11000;
                 Mgt.CalculateAdvanceAndCommission(Line);
-                CheckValue('Loss requires policy review', 0, Line."Calculated Commission Preview");
+                CheckValue('Loss is negative', -1000, Line."Net P/L (USD)");
+                CheckValue('Loss penalty rate', 60, Line."Actual Commission (%)");
+                CheckValue('Loss penalty preview', -600, Line."Calculated Commission Preview");
+                Line."Supplier Payment Date" := DMY2Date(1, 9, 2026);
+                Mgt.CalculateAdvanceAndCommission(Line);
+                CheckValue('Advance does not reduce loss penalty', -600, Line."Calculated Commission Preview");
+                Line."Bill (USD)" := 10123.45;
+                Mgt.CalculateAdvanceAndCommission(Line);
+                CheckValue('Loss penalty cents', -74.07, Line."Calculated Commission Preview");
+                Line."Cost Inputs Reviewed" := false;
+                Mgt.CalculateAdvanceAndCommission(Line);
+                CheckValue('Unreviewed loss remains blocked', 0, Line."Calculated Commission Preview");
+                Line."Cost Inputs Reviewed" := true;
+                Line."Bill (USD)" := 10000;
+                Mgt.CalculateAdvanceAndCommission(Line);
+                CheckValue('Break even has no commission', 0, Line."Calculated Commission Preview");
+                CheckValue('Break even actual rate', 0, Line."Actual Commission (%)");
+                Line."Bill (USD)" := 7500;
+                Mgt.CalculateAdvanceAndCommission(Line);
+                CheckValue('Profit rate restored after loss', 13.5, Line."Actual Commission (%)");
+                CheckValue('Profit preview restored after loss', 337.50, Line."Calculated Commission Preview");
                 // Profit must not be blocked just because supplier matching is pending.
                 Line."Bill (USD)" := 7500;
                 Line."Supplier Match Complete" := false;

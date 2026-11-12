@@ -339,11 +339,19 @@ codeunit 90420 "APSS Commission Mgt."
         Commission."P/L (%)" := 0;
         if Commission."Invoice (USD)" <> 0 then
             Commission."P/L (%)" := Commission."Net P/L (USD)" / Commission."Invoice (USD)" * 100;
+        // Losses use a fixed 60% penalty, independent of the advance-period
+        // deduction used for profitable sales. Preserve the negative sign.
+        if Commission."Net P/L (USD)" < 0 then
+            Commission."Actual Commission (%)" := 60;
+        if Commission."Net P/L (USD)" = 0 then
+            Commission."Actual Commission (%)" := 0;
         if Commission."Cost Inputs Reviewed" and Commission."Supplier Match Complete" and
            Commission."Customer Paid" and Commission."Suppliers Paid" and
-           (Commission."Customer Payment Date" <> 0D) and (Commission."Supplier Payment Date" <> 0D) and
-           (Commission."Net P/L (USD)" > 0) then
+           (Commission."Customer Payment Date" <> 0D) and (Commission."Supplier Payment Date" <> 0D) then
             Commission."Calculated Commission Preview" := Round(Commission."Net P/L (USD)" * Commission."Actual Commission (%)" / 100, 0.01);
-        Commission."Calculation Note" := 'Preview only. Verify all supplier documents and payments before implementing payable commission. Multi-payment weighting is not implemented.';
+        if Commission."Net P/L (USD)" < 0 then
+            Commission."Calculation Note" := 'Loss penalty: Net P/L x 60%; advance deduction does not change this rate. Preview requires Reviewed and verified invoice/payment data. Payroll posting is not implemented.'
+        else
+            Commission."Calculation Note" := 'Preview only. Verify all supplier documents and payments before implementing payable commission. Multi-payment weighting is not implemented.';
     end;
 }

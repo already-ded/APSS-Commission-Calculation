@@ -13,7 +13,6 @@ page 90423 "APSS Commission Allocations"
             {
                 field("Sales Invoice Line No."; Rec."Sales Invoice Line No.") { ApplicationArea = All; }
                 field("Item No."; Rec."Item No.") { ApplicationArea = All; }
-                field("Variant Code"; Rec."Variant Code") { ApplicationArea = All; }
                 field("Purchase Invoice No."; Rec."Purchase Invoice No.")
                 {
                     ApplicationArea = All;
@@ -30,7 +29,6 @@ page 90423 "APSS Commission Allocations"
                 }
                 field("Purchase Invoice Line No."; Rec."Purchase Invoice Line No.") { ApplicationArea = All; }
                 field("Purchase Order No."; Rec."Purchase Order No.") { ApplicationArea = All; }
-                field("Allocated Quantity (Base)"; Rec."Allocated Quantity (Base)") { ApplicationArea = All; }
                 field("Allocated Cost USD"; Rec."Allocated Cost USD") { ApplicationArea = All; }
                 field("Match Source"; Rec."Match Source") { ApplicationArea = All; }
             }
